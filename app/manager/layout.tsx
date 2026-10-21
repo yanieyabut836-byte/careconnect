@@ -24,16 +24,21 @@ export default async function ManagerShellLayout({
     .from('employees')
     .select('full_name, position')
     .eq('account_id', user.id)
-    .single()
+    .maybeSingle()
 
-  const displayName = employee?.full_name || user.email || 'Manager'
+  const displayName = employee?.full_name || 'Yanie Yabut'
 
   return (
-    <div className="shell">
+    <div className="h-screen w-screen overflow-hidden flex bg-[#F1F5F9] font-sans antialiased text-slate-900">
+      {/* Fixed Sidebar */}
       <Sidebar role="manager" />
-      <div className="main-content">
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
         <TopBar displayName={displayName} position={employee?.position ?? 'Department Manager'} />
-        <div className="page-content">{children}</div>
+        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+          {children}
+        </main>
       </div>
     </div>
   )

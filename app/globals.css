@@ -47,6 +47,16 @@
   --shadow-input-focus: 0 0 0 3px rgb(99 102 241 / 0.15);
 }
 
+/* Hide native password reveal in Edge and Chrome */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+input::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* =====================================================
    Base Reset & Typography
    ===================================================== */

@@ -28,27 +28,37 @@ export async function loginAction(
   if (!password) fieldErrors.password = 'Password is required.'
   if (Object.keys(fieldErrors).length > 0) return { fieldErrors }
 
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder')
+  ) {
+    return {
+      error:
+        'Supabase is not configured yet. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.',
+    }
+  }
+
   let emailToAuth = inputEmailOrId
 
-  // If input is an Employee ID (e.g. EMP-001) without @, resolve to account email
-  if (!emailToAuth.includes('@')) {
-    try {
-      const admin = createAdminClient()
-      const { data: emp } = await admin
-        .from('employees')
-        .select('account_id')
-        .ilike('employee_code', emailToAuth.replace(/[\\%_]/g, (c) => `\\${c}`))
-        .maybeSingle()
+  // Resolve username/employee_code or personal_email to auth email
+  try {
+    const admin = createAdminClient()
+    const sanitized = emailToAuth.replace(/[\\%_]/g, (c) => `\\${c}`)
+    const { data: emp } = await admin
+      .from('employees')
+      .select('account_id')
+      .or(`employee_code.ilike.${sanitized},personal_email.ilike.${sanitized}`)
+      .maybeSingle()
 
-      if (emp?.account_id) {
-        const { data: authUser } = await admin.auth.admin.getUserById(emp.account_id)
-        if (authUser?.user?.email) {
-          emailToAuth = authUser.user.email
-        }
+    if (emp?.account_id) {
+      const { data: authUser } = await admin.auth.admin.getUserById(emp.account_id)
+      if (authUser?.user?.email) {
+        emailToAuth = authUser.user.email
       }
-    } catch (err) {
-      console.error('[loginAction] Employee ID lookup failed:', err)
     }
+  } catch (err) {
+    console.error('[loginAction] Account lookup failed:', err)
   }
 
   const supabase = await createClient()
@@ -173,7 +183,7 @@ export async function activateAccountAction(
   // Same response whether or not the details match, so IDs/emails can't be probed.
   const genericSuccess: ActivateAccountState = {
     success:
-      'Activation link sent successfully! Please check your email inbox (and spam folder) to complete your account activation.',
+      'Activation details sent successfully! Please check your email inbox (and spam folder) for your default username, default password, and activation link.',
   }
 
   // Fail loudly (instead of pretending success) if server keys aren't configured
@@ -205,15 +215,14 @@ export async function activateAccountAction(
     }
     if (!employee?.account_id) {
       console.warn(`[activate] No employee found with employee_code "${employeeId}"`)
-      return genericSuccess
+      return { fieldErrors: { employeeId: 'Employee ID was not found. Please check your ID.' } }
     }
-    // Note: Allow sending activation magic link even if requested again
 
     const { data: authData } = await admin.auth.admin.getUserById(employee.account_id)
     const authUser = authData?.user
     if (!authUser?.email) {
       console.warn('[activate] Linked auth user has no email')
-      return genericSuccess
+      return { error: 'No user account found linked to this employee. Please contact the administrator.' }
     }
 
     const knownEmails = [authUser.email, employee.personal_email]
@@ -223,14 +232,23 @@ export async function activateAccountAction(
       console.warn(
         `[activate] Email "${email}" does not match records for ${employee.employee_code} (personal_email: ${employee.personal_email ?? 'null'})`
       )
-      return genericSuccess
+      return { fieldErrors: { email: 'Email address does not match the record for this Employee ID.' } }
     }
 
-    // Set default temporary password
+    const defaultUsername = employee.employee_code || employeeId
+    const defaultPassword = 'CareConnect123!'
+
+    // Set default temporary password and unactivated status
     await admin.auth.admin.updateUserById(employee.account_id, {
-      password: 'CareConnect123!',
-      user_metadata: { ...authUser.user_metadata, is_activated: false },
+      password: defaultPassword,
+      user_metadata: { ...authUser.user_metadata, is_activated: false, username: defaultUsername },
     })
+
+    // Also ensure employees table marks is_activated as false until completed
+    await admin
+      .from('employees')
+      .update({ is_activated: false })
+      .eq('account_id', employee.account_id)
 
     // Generate activation link and send email
     const { data: link, error: linkError } = await admin.auth.admin.generateLink({
@@ -251,6 +269,8 @@ export async function activateAccountAction(
     await sendActivationEmail({
       to: email,
       name: employee.full_name || undefined,
+      defaultUsername,
+      defaultPassword,
       activationUrl,
     })
   } catch (err) {
@@ -262,11 +282,12 @@ export async function activateAccountAction(
 }
 
 // ---------------------------------------------------------------------------
-// Change Password (forced on first login, replaces the default password)
+// Change Password & Username (forced on first login, replaces the default credentials)
 // ---------------------------------------------------------------------------
 export type ChangePasswordState = {
   error?: string
   fieldErrors?: {
+    username?: string
     currentPassword?: string
     newPassword?: string
     confirmPassword?: string
@@ -278,6 +299,7 @@ export async function changePasswordAction(
   _prevState: ChangePasswordState,
   formData: FormData
 ): Promise<ChangePasswordState> {
+  const newUsername = ((formData.get('newUsername') as string) ?? '').trim()
   const currentPassword = (formData.get('currentPassword') as string) ?? ''
   const newPassword = (formData.get('newPassword') as string) ?? ''
   const confirmPassword = (formData.get('confirmPassword') as string) ?? ''
@@ -294,6 +316,34 @@ export async function changePasswordAction(
   const isActivated = current.user_metadata?.is_activated as boolean | undefined
 
   const fieldErrors: NonNullable<ChangePasswordState>['fieldErrors'] = {}
+
+  // Validate username
+  if (!newUsername) {
+    fieldErrors.username = 'New username is required.'
+  } else if (newUsername.length < 3) {
+    fieldErrors.username = 'Username must be at least 3 characters.'
+  } else if (!/^[a-zA-Z0-9_.-]+$/.test(newUsername)) {
+    fieldErrors.username = 'Username can only contain letters, numbers, hyphens, and underscores.'
+  } else if (['EMP-001', 'MGR-001', 'DEFAULT', 'ADMIN'].includes(newUsername.toUpperCase())) {
+    fieldErrors.username = 'Please choose a new personalized username to replace the default system ID.'
+  } else {
+    // Check if another employee already has this username / employee_code
+    try {
+      const admin = createAdminClient()
+      const { data: existingEmp } = await admin
+        .from('employees')
+        .select('id')
+        .ilike('employee_code', newUsername.replace(/[\\%_]/g, (c) => `\\${c}`))
+        .neq('account_id', current.id)
+        .maybeSingle()
+
+      if (existingEmp) {
+        fieldErrors.username = 'This username is already taken. Please choose another.'
+      }
+    } catch (err) {
+      console.error('[changePasswordAction] Username uniqueness check failed:', err)
+    }
+  }
 
   // Only require current password if account was already activated
   if (isActivated === true && !currentPassword) {
@@ -329,24 +379,31 @@ export async function changePasswordAction(
     }
   }
 
+  // Update password and user metadata in Supabase Auth
   const { error: pwError } = await supabase.auth.updateUser({
     password: newPassword,
-    data: { is_activated: true },
+    data: {
+      is_activated: true,
+      username: newUsername,
+    },
   })
 
   if (pwError) {
     return { error: pwError.message }
   }
 
-  // Mark employee record as activated using admin client
+  // Mark employee record as activated in Supabase database and update employee_code/username
   try {
     const admin = createAdminClient()
     await admin
       .from('employees')
-      .update({ is_activated: true })
+      .update({
+        employee_code: newUsername,
+        is_activated: true,
+      })
       .eq('account_id', current.id)
   } catch (err) {
-    console.error('Failed to update employee is_activated in db:', err)
+    console.error('Failed to update employee in db:', err)
   }
 
   const role = current.user_metadata?.role as string | undefined

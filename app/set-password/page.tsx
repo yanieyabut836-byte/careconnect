@@ -1,23 +1,46 @@
 import type { Metadata } from 'next'
 import ActivationLayout from '@/components/activation-layout'
 import SetPasswordForm from './set-password-form'
+import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export const metadata: Metadata = {
-  title: 'Change Password - CareConnect',
-  description: 'Please set a new password for your account.',
+  title: 'Set Your Credentials - CareConnect',
+  description: 'Please set your new username and password for your account.',
 }
 
-export default function SetPasswordPage() {
+export default async function SetPasswordPage() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  let defaultUsername = ''
+  if (user?.id) {
+    try {
+      const admin = createAdminClient()
+      const { data: emp } = await admin
+        .from('employees')
+        .select('employee_code')
+        .eq('account_id', user.id)
+        .maybeSingle()
+
+      defaultUsername = emp?.employee_code || (user.user_metadata?.username as string) || ''
+    } catch (e) {
+      console.error('Failed to get default username:', e)
+    }
+  }
+
   return (
     <ActivationLayout
-      title="Change Password"
-      subtitle="Please set a new password for your account."
+      title="Set Credentials"
+      subtitle="Please set your new username and password to complete activation."
       illustration="monitor"
-      welcomeTitle="For Your Security"
-      welcomeText="Please change your default password before continuing to the system."
+      welcomeTitle="Welcome to CareConnect"
+      welcomeText="Replace the default credentials sent to your email with your personalized username and password."
       contentClassName="max-w-[460px] lg:max-w-[760px]"
     >
-      <SetPasswordForm />
+      <SetPasswordForm defaultUsername={defaultUsername} />
     </ActivationLayout>
   )
 }

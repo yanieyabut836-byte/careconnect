@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useState, useRef, useEffect } from 'react'
 import { changePasswordAction, type ChangePasswordState } from '@/app/actions/auth'
 
 const inputBase =
@@ -17,80 +17,53 @@ const requirements = [
   { label: 'One specialized character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
 ]
 
-function EyeToggle({ shown, onClick }: { shown: boolean; onClick: () => void }) {
+function EyeIcon() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={shown ? 'Hide password' : 'Show password'}
-      className="absolute inset-y-0 right-0 pr-5 flex items-center text-[#6B7280] hover:text-[#374151] focus:outline-none"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {shown ? (
-          <>
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-            <line x1="1" y1="1" x2="23" y2="23" />
-          </>
-        ) : (
-          <>
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-            <circle cx="12" cy="12" r="3" />
-          </>
-        )}
-      </svg>
-    </button>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   )
 }
 
-function PasswordField({
-  id,
-  label,
-  placeholder,
-  autoComplete,
-  error,
-  disabled,
-  value,
-  onChange,
-}: {
-  id: string
-  label: string
-  placeholder: string
-  autoComplete: string
-  error?: string
-  disabled: boolean
-  value?: string
-  onChange?: (v: string) => void
-}) {
-  const [show, setShow] = useState(false)
+function EyeOffIcon() {
   return (
-    <div>
-      <label className={labelCls} htmlFor={id}>{label}</label>
-      <div className="relative">
-        <input
-          id={id}
-          name={id}
-          type={show ? 'text' : 'password'}
-          autoComplete={autoComplete}
-          placeholder={placeholder}
-          disabled={disabled}
-          {...(onChange
-            ? { value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value) }
-            : {})}
-          className={`${inputBase} ${inputBorder(error)}`}
-        />
-        <EyeToggle shown={show} onClick={() => setShow((v) => !v)} />
-      </div>
-      {error && <p className="text-xs text-red-600 font-medium pl-4 mt-1.5">{error}</p>}
-    </div>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
   )
 }
 
-export default function SetPasswordForm() {
+export default function SetPasswordForm({ defaultUsername = '' }: { defaultUsername?: string }) {
   const [state, action, pending] = useActionState<ChangePasswordState, FormData>(
     changePasswordAction,
     null
   )
+
   const [newPassword, setNewPassword] = useState('')
+  const newPasswordRef = useRef<HTMLInputElement>(null)
+
+  // Toggle visibility states for each password field
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
+  // Poll / check input value periodically to detect browser autofill
+  useEffect(() => {
+    const syncValue = () => {
+      if (newPasswordRef.current) {
+        const val = newPasswordRef.current.value
+        if (val !== newPassword) {
+          setNewPassword(val)
+        }
+      }
+    }
+    syncValue()
+    const timer = setInterval(syncValue, 250)
+    return () => clearInterval(timer)
+  }, [newPassword])
+
   const fe = state?.fieldErrors
 
   return (
@@ -105,38 +78,127 @@ export default function SetPasswordForm() {
           </div>
         )}
 
-        <PasswordField
-          id="currentPassword"
-          label="Current Password (Optional if activating)"
-          placeholder="Enter current password if assigned"
-          autoComplete="current-password"
-          error={fe?.currentPassword}
-          disabled={pending}
-        />
-        <PasswordField
-          id="newPassword"
-          label="New Password"
-          placeholder="Enter new password"
-          autoComplete="new-password"
-          error={fe?.newPassword}
-          disabled={pending}
-          value={newPassword}
-          onChange={setNewPassword}
-        />
-        <PasswordField
-          id="confirmPassword"
-          label="Confirm New Password"
-          placeholder="Confirm new password"
-          autoComplete="new-password"
-          error={fe?.confirmPassword}
-          disabled={pending}
-        />
+        {/* Assigned Default Username Pill */}
+        {defaultUsername && (
+          <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200/90 flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Default Username Assigned</p>
+              <p className="text-sm font-extrabold text-slate-800 font-mono mt-0.5">{defaultUsername}</p>
+            </div>
+            <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[11px] font-bold">
+              Must be replaced
+            </span>
+          </div>
+        )}
+
+        {/* 1. New Personal Username */}
+        <div>
+          <label className={labelCls} htmlFor="newUsername">New Personal Username</label>
+          <input
+            id="newUsername"
+            name="newUsername"
+            type="text"
+            autoComplete="username"
+            placeholder="e.g. yanieyabut"
+            disabled={pending}
+            className={`${inputBase.replace('pr-14', 'pr-6')} ${inputBorder(fe?.username)}`}
+          />
+          <p className="text-xs text-slate-500 font-medium pl-4 mt-1.5">
+            Choose your permanent username. You will use this to sign in to CareConnect.
+          </p>
+          {fe?.username && <p className="text-xs text-red-600 font-medium pl-4 mt-1.5">{fe.username}</p>}
+        </div>
+
+        {/* 2. Current / Default Password */}
+        <div>
+          <label className={labelCls} htmlFor="currentPassword">Current / Default Password (Optional)</label>
+          <div className="relative">
+            <input
+              id="currentPassword"
+              name="currentPassword"
+              type={showCurrentPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              placeholder="e.g. CareConnect123!"
+              disabled={pending}
+              className={`${inputBase} ${inputBorder(fe?.currentPassword)}`}
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowCurrentPassword((prev) => !prev)}
+              aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+              className="absolute right-0 top-0 bottom-0 w-14 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors z-20 cursor-pointer"
+            >
+              {showCurrentPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+          {fe?.currentPassword && <p className="text-xs text-red-600 font-medium pl-4 mt-1.5">{fe.currentPassword}</p>}
+        </div>
+
+        {/* 3. New Password */}
+        <div>
+          <label className={labelCls} htmlFor="newPassword">New Password</label>
+          <div className="relative">
+            <input
+              ref={newPasswordRef}
+              id="newPassword"
+              name="newPassword"
+              type={showNewPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              placeholder="Enter new password"
+              disabled={pending}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              onInput={(e) => setNewPassword((e.target as HTMLInputElement).value)}
+              className={`${inputBase} ${inputBorder(fe?.newPassword)}`}
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowNewPassword((prev) => !prev)}
+              aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+              className="absolute right-0 top-0 bottom-0 w-14 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors z-20 cursor-pointer"
+            >
+              {showNewPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+          {fe?.newPassword && <p className="text-xs text-red-600 font-medium pl-4 mt-1.5">{fe.newPassword}</p>}
+        </div>
+
+        {/* 4. Confirm New Password */}
+        <div>
+          <label className={labelCls} htmlFor="confirmPassword">Confirm New Password</label>
+          <div className="relative">
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type={showConfirmPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              placeholder="Confirm new password"
+              disabled={pending}
+              className={`${inputBase} ${inputBorder(fe?.confirmPassword)}`}
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowConfirmPassword((prev) => !prev)}
+              aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+              className="absolute right-0 top-0 bottom-0 w-14 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors z-20 cursor-pointer"
+            >
+              {showConfirmPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+          {fe?.confirmPassword && <p className="text-xs text-red-600 font-medium pl-4 mt-1.5">{fe.confirmPassword}</p>}
+        </div>
 
         <button
           id="save-password-submit"
           type="submit"
           disabled={pending}
-          className="w-full py-4 px-6 mt-3 bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white font-medium rounded-full text-xl shadow-lg shadow-[#2563EB]/25 hover:shadow-[#2563EB]/35 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2563EB]/30 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+          className="w-full py-4 px-6 mt-3 bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white font-medium rounded-full text-xl shadow-lg shadow-[#2563EB]/25 hover:shadow-[#2563EB]/35 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2563EB]/30 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
         >
           {pending ? (
             <>
@@ -144,27 +206,48 @@ export default function SetPasswordForm() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              <span>Saving...</span>
+              <span>Saving credentials...</span>
             </>
           ) : (
-            'Save Password'
+            'Save Credentials & Continue'
           )}
         </button>
+
+        <div className="text-center pt-2">
+          <a
+            href="/login"
+            className="text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors inline-flex items-center gap-1.5"
+          >
+            ← Back to Login
+          </a>
+        </div>
       </div>
 
-      {/* Password requirements */}
-      <aside aria-label="Password requirements" className="lg:pt-[3.25rem] lg:w-[250px] shrink-0">
-        <h2 className="text-base font-semibold text-slate-950 mb-3">Password Requirements</h2>
-        <ul className="space-y-2.5">
+      {/* Password Requirements Checklist (Lights up green when met) */}
+      <aside aria-label="Password requirements" className="lg:pt-[3.25rem] lg:w-[260px] shrink-0">
+        <h2 className="text-base font-bold text-slate-900 mb-3.5">Password Requirements</h2>
+        <ul className="space-y-3">
           {requirements.map((r) => {
             const ok = r.test(newPassword)
             return (
-              <li key={r.label} className={`flex items-center gap-2.5 text-[15px] transition-colors ${ok ? 'text-slate-950' : 'text-slate-500'}`}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="shrink-0">
-                  <circle cx="12" cy="12" r="10" stroke={ok ? '#00C853' : '#9CA3AF'} strokeWidth="1.8" fill={ok ? '#00C853' : 'none'} />
-                  <path d="M7.5 12.5l3 3 6-6.5" stroke={ok ? '#fff' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {r.label}
+              <li
+                key={r.label}
+                className={`flex items-center gap-3 text-sm transition-all duration-200 ${
+                  ok ? 'text-emerald-700 font-bold' : 'text-slate-400 font-medium'
+                }`}
+              >
+                <div
+                  className={`w-5.5 h-5.5 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 ${
+                    ok
+                      ? 'bg-emerald-500 text-white shadow-xs shadow-emerald-500/30 ring-2 ring-emerald-500/20'
+                      : 'border-2 border-slate-300 text-transparent bg-white'
+                  }`}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <span>{r.label}</span>
               </li>
             )
           })}

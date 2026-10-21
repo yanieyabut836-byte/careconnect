@@ -25,7 +25,7 @@ export default async function EmployeeShellLayout({
     .from('employees')
     .select('full_name, position, department')
     .eq('account_id', user.id)
-    .single()
+    .maybeSingle()
 
   const displayName = employee?.full_name || 'Yanie Yabut'
 
